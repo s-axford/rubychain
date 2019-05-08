@@ -18,20 +18,19 @@ class Blockchain
         :param previous_hash: (Optional) <str> Hash of previous Block
         :return: <dict> New Block
   """
-  def new_block(previous_hash, proof)
+  def new_block(previous_hash=nil , proof)
     block = {
         :index => @chain.length + 1,
         :timestamp => Time.now.strftime("%d/%m/%Y %H:%M"),
         :transactions => @current_transactions,
         :proof => proof,
-        :previous_hash => previous_hash || Blockchain.hash(self.chain[-1]),
+        :previous_hash => previous_hash || Blockchain.hash(@chain[-1]),
     }
 
     @current_transactions = []
     @chain.push(block)
     block
   end
-
 
   """
         Creates a new transaction to go into the next mined Block
@@ -41,12 +40,12 @@ class Blockchain
         :return: <int> The index of the Block that will hold this transaction
   """
   def new_transaction(sender, recipient, amount)
-    self.current_transactions << {
+    @current_transactions << {
         :sender => sender,
         :recipient => recipient,
         :amount => amount,
     }
-    self.last_block['index'] + 1
+    self.last_block[:index] + 1
   end
 
   def last_block
@@ -59,9 +58,8 @@ class Blockchain
         :return: <str>
   """
   def self.hash(block)
-    block_string = JSON.dump(block, sort_keys=true).encode
-    sha256 = Digest::SHA2.new(256)
-    sha256.digest block_string
+    block_string = block.sort_by { |key| key }.to_h.to_s
+    Digest::SHA2.new(256).hexdigest block_string
   end
 
 
@@ -74,7 +72,7 @@ class Blockchain
   """
   def proof_of_work(last_proof)
     proof = 0
-    until self.valid_proof(last_proof, proof)
+    until Blockchain.valid_proof(last_proof, proof)
       proof += 1
     end
     proof
@@ -89,27 +87,67 @@ class Blockchain
   def self.valid_proof(last_proof, proof)
     guess = "#{last_proof}#{proof}".encode
     guess_hash = Digest::SHA2.new(256).hexdigest(guess)
-    guess_hash
+    guess_hash[0..3] == "0000"
   end
 
   attr_reader :chain
 end
 
+# Generate a globally unique address for this node
+node_identifier = SecureRandom.uuid.gsub! '-', ''
+
 # Instantiate the Blockchain
 blockchain = Blockchain.new
 
 get '/mine' do
-  "We'll mine a new Block"
+  # We run the proof of work algorithm to get the next proof...
+  last_block = blockchain.last_block
+  last_proof = last_block[:proof]
+  proof = blockchain.proof_of_work(last_proof)
+
+  # We must receive a reward for finding the proof.
+  # The sender is "0" to signify that this node has mined a new coin.
+  blockchain.new_transaction(
+      sender="0",
+      recipient=node_identifier,
+      amount=1,
+      )
+
+  # Forge the new Block by adding it to the chain
+  previous_hash = Blockchain.hash(last_block)
+  block = blockchain.new_block(previous_hash, proof)
+
+  response = {
+      :message => "New Block Forged",
+      :index => block[:index],
+      :transactions => block[:transactions],
+      :proof => block[:proof],
+      :previous_hash => block[:previous_hash],
+  }
+  response.to_json
 end
 
 post '/transactions/new' do
-  "We'll add a new transaction"
+  values = JSON.parse(request.body.read)
+  keys = values.keys
+  # Check that the required fields are in the POST'ed data
+  required = Array.new
+  required << 'sender' << 'recipient' << 'amount'
+  unless (required - keys).empty?
+    return 'missing values'
+  end
+
+  index = blockchain.new_transaction(values['sender'], values['recipient'], values['amount'])
+  response = {
+      :message => "Transaction will be added to Block #{index}"
+  }
+  response.to_json
 end
 
 get '/chain' do
   response = {
-      'chain': blockchain.chain,
-      'length': blockchain.chain.length,
+      :chain => blockchain.chain,
+      :length => blockchain.chain.length,
   }
   response.to_json
 end
