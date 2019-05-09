@@ -8,6 +8,10 @@ node_identifier = SecureRandom.uuid.gsub! '-', ''
 # Instantiate the Blockchain
 blockchain = Blockchain.new
 
+get '/identifier' do
+  [200, node_identifier]
+end
+
 get '/mine' do
   # We run the proof of work algorithm to get the next proof...
   last_block = blockchain.last_block
